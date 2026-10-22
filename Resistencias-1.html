@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Calculadora de Resistencias</title>
+  <style>
+    body { 
+      font-family: Arial, sans-serif; 
+      margin: 20px; 
+      background-color: #e0f7fa; 
+      text-align: center; 
+    }
+    label { display: block; margin-top: 10px; font-weight: bold; }
+    input, select, button { margin-top: 5px; padding: 6px 12px; font-size: 14px; }
+    button { background-color: #00796b; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background-color: #004d40; }
+    .resultado { margin-top: 20px; font-weight: bold; }
+    table { 
+      border-collapse: collapse; 
+      margin: 20px auto; 
+      width: 85%; 
+      background-color: #fff; 
+      box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    th { 
+      background-color: #00796b; 
+      color: white; 
+      padding: 12px; 
+      text-transform: uppercase;
+    }
+    td { 
+      border-bottom: 1px solid #ddd; 
+      padding: 10px; 
+    }
+    tr:hover { background-color: #f1f1f1; }
+    canvas { margin: 15px auto; border: 1px solid #333; background-color: white; display: block; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h2>Calculadora de Resistencias</h2>
+
+  <label>Cantidad de resistencias:
+    <input type="number" id="cantidad" min="1" max="10" value="2">
+  </label>
+
+  <label>Tipo de conexión:
+    <select id="conexion">
+      <option value="serie">Serie</option>
+      <option value="paralelo">Paralelo</option>
+    </select>
+  </label>
+
+  <label>Resistencia deseada (Ω):
+    <input type="number" id="deseada" min="1" value="1000">
+  </label>
+
+  <button onclick="calcular()">Calcular</button>
+
+  <div class="resultado" id="resultado"></div>
+  <div id="simulaciones"></div>
+
+  <h3>Diagrama de conexión</h3>
+  <canvas id="conexionCanvas" width="600" height="250"></canvas>
+
+  <script>
+    const E12 = [1.0, 1.2, 1.5, 1.8, 2.2, 2.7, 3.3, 3.9, 4.7, 5.6, 6.8, 8.2];
+    const coloresTabla = {
+      0: "Negro", 1: "Marrón", 2: "Rojo", 3: "Naranja", 4: "Amarillo",
+      5: "Verde", 6: "Azul", 7: "Violeta", 8: "Gris", 9: "Blanco"
+    };
+    const coloresHex = {
+      "Negro":"#000000","Marrón":"#8B4513","Rojo":"#FF0000","Naranja":"#FFA500",
+      "Amarillo":"#FFFF00","Verde":"#008000","Azul":"#0000FF","Violeta":"#8A2BE2",
+      "Gris":"#808080","Blanco":"#FFFFFF","Oro":"#FFD700"
+    };
+
+    function calcular() {
+      const cantidad = parseInt(document.getElementById("cantidad").value);
+      const conexion = document.getElementById("conexion").value;
+      const deseada = parseFloat(document.getElementById("deseada").value);
+
+      if (isNaN(cantidad) || cantidad <= 0 || isNaN(deseada) || deseada <= 0) {
+        alert("Por favor ingresa valores válidos.");
+        return;
+      }
+
+      let valorCadaResistencia;
+      if (conexion === "serie") {
+        valorCadaResistencia = deseada / cantidad;
+      } else {
+        valorCadaResistencia = deseada * cantidad;
+      }
+
+      const opciones = resistenciasComercialesCercanas(valorCadaResistencia);
+
+      let tabla = `<p>Resistencia deseada: ${deseada} Ω<br>
+                   Tipo de conexión: ${conexion}<br>
+                   Valor calculado por resistencia: ${valorCadaResistencia.toFixed(2)} Ω</p>`;
+      tabla += `<table>
+                  <tr>
+                    <th>Valor Comercial (Ω)</th>
+                    <th>Cantidad Necesaria</th>
+                    <th>Error (%)</th>
+                    <th>Código de Colores</th>
+                    <th>Tolerancias</th>
+                  </tr>`;
+      opciones.forEach(op => {
+        const error = ((op - valorCadaResistencia) / valorCadaResistencia) * 100;
+        const colores = codigoColores(op).join(" - ");
+        tabla += `<tr>
+                    <td>${op}</td>
+                    <td>${cantidad}</td>
+                    <td>${error.toFixed(2)}%</td>
+                    <td>${colores}</td>
+                    <td>±1%, ±5%, ±10%</td>
+                  </tr>`;
+      });
+      tabla += `</table>`;
+
+      document.getElementById("resultado").innerHTML = tabla;
+
+      // Dibujar simulaciones de cada resistencia comercial
+      const simulacionesDiv = document.getElementById("simulaciones");
+      simulacionesDiv.innerHTML = "";
+      opciones.forEach((op) => {
+        const colores = codigoColores(op);
+        const canvas = document.createElement("canvas");
+        canvas.width = 400;
+        canvas.height = 120;
+        simulacionesDiv.appendChild(canvas);
+        dibujarResistencia(canvas, colores, op);
+      });
+
+      // Dibujar diagrama de conexión
+      dibujarConexion(conexion, cantidad);
+    }
+
+    function resistenciasComercialesCercanas(valor) {
+      let decade = Math.pow(10, Math.floor(Math.log10(valor)));
+      let normalized = valor / decade;
+      let ordenadas = E12.slice().sort((a, b) =>
+        Math.abs(a - normalized) - Math.abs(b - normalized)
+      );
+      return ordenadas.slice(0, 3).map(v => v * decade);
+    }
+
+    function codigoColores(valor) {
+      let strVal = Math.round(valor).toString();
+      if (strVal.length < 2) strVal = strVal.padEnd(2, "0");
+      let dig1 = parseInt(strVal[0]);
+      let dig2 = parseInt(strVal[1]);
+      let multiplicador = strVal.length - 2;
+      return [
+        coloresTabla[dig1] || "Negro",
+        coloresTabla[dig2] || "Negro",
+        coloresTabla[multiplicador] || "Negro",
+        "Oro"
+      ];
+    }
+
+    function dibujarResistencia(canvas, bandas, valor) {
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = "#D2B48C";
+      ctx.fillRect(50, 40, 300, 40);
+
+      let x = 80;
+      bandas.forEach(color => {
+        ctx.fillStyle = coloresHex[color] || "#000";
+        ctx.fillRect(x, 40, 20, 40);
+        x += 40;
+      });
+
+      ctx.fillStyle = "#C0C0C0";
+      ctx.fillRect(30, 55, 20, 10);
+      ctx.fillRect(350, 55, 20, 10);
+
+      ctx.fillStyle = "#000";
+      ctx.font = "16px Arial";
+      ctx.fillText(`${valor} Ω`, 160, 100);
+    }
+
+    function dibujarConexion(tipo, cantidad) {
+      const canvas = document.getElementById("conexionCanvas");
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.strokeStyle = "#000";
+      ctx.lineWidth = 2;
+      ctx.font = "14px Arial";
+      ctx.textAlign = "center";
+
+      if (tipo === "serie") {
+        // Resistencias en serie
+        const anchoRes = 50;
+        const espacio = (canvas.width - 100) / cantidad;
+        let x = 50;
+
+        ctx.beginPath();
+        ctx.moveTo(20, 125);
+        ctx.lineTo(x, 125);
+        ctx.stroke();
+
+        for (let i = 0; i < cantidad; i++) {
+          let centroX = x + espacio / 2;
+          ctx.strokeRect(centroX - anchoRes / 2, 105, anchoRes, 40);
+          ctx.fillText("R" + (i + 1), centroX, 130);
+
+          ctx.beginPath();
+          ctx.moveTo(x, 125);
+          ctx.lineTo(centroX - anchoRes / 2, 125);
+          ctx.moveTo(centroX + anchoRes / 2, 125);
+          ctx.lineTo(x + espacio, 125);
+          ctx.stroke();
+
+          x += espacio;
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(x, 125);
+        ctx.lineTo(canvas.width - 20, 125);
+        ctx.stroke();
+
+      } else {
+        // Resistencias en paralelo
+        const xIzq = 100;
+        const xDer = 500;
+        const altoTotal = canvas.height - 60;
+        const pasoY = cantidad > 1 ? altoTotal / (cantidad - 1) : 0;
+        const inicioY = cantidad > 1 ? 30 : canvas.height / 2;
+
+        // Busbars verticales
+        ctx.beginPath();
+        ctx.moveTo(xIzq, inicioY);
+        ctx.lineTo(xIzq, inicioY + (cantidad > 1 ? altoTotal : 0));
+        ctx.moveTo(xDer, inicioY);
+        ctx.lineTo(xDer, inicioY + (cantidad > 1 ? altoTotal : 0));
+
+        // Terminales externos
+        ctx.moveTo(20, canvas.height / 2);
+        ctx.lineTo(xIzq, canvas.height / 2);
+        ctx.moveTo(xDer, canvas.height / 2);
+        ctx.lineTo(canvas.width - 20, canvas.height / 2);
+        ctx.stroke();
+
+        for (let i = 0; i < cantidad; i++) {
+          let y = inicioY + (i * pasoY);
+          
+          // Conexiones de cable horizontal
+          ctx.beginPath();
+          ctx.moveTo(xIzq, y);
+          ctx.lineTo(270, y);
+          ctx.moveTo(330, y);
+          ctx.lineTo(xDer, y);
+          ctx.stroke();
+
+          // Componente resistencia (rectángulo)
+          ctx.fillStyle = "#fff";
+          ctx.fillRect(270, y - 15, 60, 30);
+          ctx.strokeRect(270, y - 15, 60, 30);
+          
+          ctx.fillStyle = "#000";
+          ctx.fillText("R" + (i + 1), 300, y + 5);
+        }
+      }
+    }
+  </script>
+</body>
+</html>
